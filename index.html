@@ -358,14 +358,11 @@
     t2.classList.toggle("active", which==="data");
   }
   document.getElementById("tab-calc").addEventListener("click", ()=>setTab("calc"));
-  document.getElementById("tab-data").addEventListener("click", ()=>setTab("data"));
-
+  const DATA_TAB_PASSWORD = "0101";
   // init
   elData.value = JSON.stringify(DEFAULT_DATA, null, 2);
   document.getElementById("calcBtn").addEventListener("click", render);
   ["withdraw_self","payments_other","incoming"].forEach(id=>{
-    const DATA_TAB_PASSWORD = "0101";
-
 document.getElementById("tab-data").addEventListener("click", () => {
 
   // если пароль уже вводили — пускаем сразу

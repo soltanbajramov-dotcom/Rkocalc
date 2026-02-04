@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Сравнение РКО — ВТБ vs Сбер (ИП)</title>
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:#f6f7fb; color:#111; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+    .card { background:#fff; border-radius:16px; padding: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.06); margin-bottom: 12px; }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    .muted { color:#666; font-size: 12px; line-height:1.35; }
+    .grid { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    @media (min-width: 840px){ .grid { grid-template-columns: 1fr 1fr; } }
+    label { font-size: 12px; color:#444; display:block; margin-bottom:6px; }
+    input, textarea { width: 100%; padding: 12px; border-radius: 12px; border:1px solid #dcdfea; font-size: 16px; box-sizing:border-box; }
+    textarea { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas; font-size: 12px; }
+    .btn { width:100%; padding: 12px; border-radius: 12px; border: 0; font-size: 16px; cursor:pointer; background:#111; color:#fff; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding: 10px; border-bottom:1px solid #eee; vertical-align: top; }
+    th { font-size: 12px; color:#555; }
+    details summary { cursor:pointer; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:space-between; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#f0f2ff; font-size: 12px; }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .tab { border:1px solid #dcdfea; background:#fff; padding:10px 12px; border-radius:999px; cursor:pointer; }
+    .tab.active { background:#111; color:#fff; border-color:#111; }
+    .note { background:#eef7ff; border:1px solid #b7dcff; padding:10px; border-radius:12px; font-size:12px; color:#0b3b66; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>РКО калькулятор (ИП): ВТБ vs Сбер</h1>
+      <div class="muted">
+        Считаем только: <b>стоимость тарифа</b> + <b>платежи юрлицам в другие банки</b> + <b>вывод себе</b>.
+        Переводы другим физлицам не учитываем.
+      </div>
+
+      <div class="tabs" style="margin-top:10px;">
+        <button class="tab active" id="tab-calc">Калькулятор</button>
+        <button class="tab" id="tab-data">Данные</button>
+      </div>
+    </div>
+
+    <div id="view-calc">
+      <div class="card">
+        <div class="grid">
+          <div>
+            <label>Вывод себе (на свои счета/карты), ₽/мес</label>
+            <input id="withdraw_self" inputmode="numeric" value="1000000" />
+            <div class="muted">ВТБ: 0 ₽ безлимитно (по твоей фиксации). Сбер: бесплатно до лимита модуля, дальше 2.5%.</div>
+          </div>
+
+          <div>
+            <label>Платежи юрлицам в другие банки, шт/мес</label>
+            <input id="payments_other" inputmode="numeric" value="20" />
+            <div class="muted">Сбер: сверх лимита 100 ₽/платёж. ВТБ: по лимитам пакета.</div>
+          </div>
+
+          <div>
+            <label>Входящий оборот, ₽/мес (нужно для ВТБ «На старте» и «Простой процент»)</label>
+            <input id="incoming" inputmode="numeric" value="1000000" />
+          </div>
+
+          <div style="display:flex; align-items:end;">
+            <button class="btn" id="calcBtn">Посчитать</button>
+          </div>
+        </div>
+
+        <div class="note" style="margin-top:10px;">
+          🔥 Выгода: если клиент много выводит себе, ВТБ обычно выигрывает, потому что вывод = 0 ₽.
+          Сбер может стать дороже, если вывод превышает лимит модуля.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div><strong>Результат</strong> <span class="pill" id="ts"></span></div>
+          <div class="muted" style="text-align:right;">Сортировка: дешевле → дороже</div>
+        </div>
+
+        <div style="overflow:auto; margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Банк / тариф</th>
+                <th>Итого в месяц</th>
+                <th>Расчёт</th>
+              </tr>
+            </thead>
+            <tbody id="out"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="view-data" style="display:none;">
+      <div class="card">
+        <strong>Данные (JSON)</strong>
+        <div class="muted">Можно редактировать тарифы прямо тут. Главное — соблюдать структуру.</div>
+        <textarea id="data" style="height: 420px; margin-top:10px;"></textarea>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // =======================
+  // ДАННЫЕ: ВТБ + СБЕР
+  // =======================
+  const DEFAULT_DATA = {
+    vtb: {
+      // Твоя фиксация: вывод себе (на свои счета/карты) бесплатный и безлимитный для всех пакетов
+      self_withdraw: { percent: 0, limit: "Infinity", note: "Бесплатно и безлимитно (по фиксации пользователя)" },
+
+      plans: [
+        {
+          name: "На старте",
+          monthly_fee_rule: { type: "vtb_na_starte", first_3_months_free: true, incoming_free_threshold: 50000, fee_if_below: 490 },
+          payments_other_banks: { free_count: 5, price_per_payment: 150 }
+        },
+        {
+          name: "Всё по делу",
+          monthly_fee_flat: 680,
+          payments_other_banks: { free_count: 8, price_per_payment: 78 }
+        },
+        {
+          name: "Самое важное",
+          monthly_fee_flat: 1480,
+          payments_other_banks: { free_count: 30, price_per_payment: 60 }
+        },
+        {
+          name: "Все включено",
+          monthly_fee_flat: 3000,
+          payments_other_banks: { free_count: 60, price_per_payment: 55 }
+        },
+        {
+          name: "Большие обороты",
+          monthly_fee_flat: 5500,
+          payments_other_banks: { free_count: 120, price_per_payment: 50 }
+        },
+        {
+          name: "Простой процент",
+          monthly_fee_rule: { type: "percent_of_incoming", percent: 1.0 },
+          payments_other_banks: { free_count: "Infinity", price_per_payment: 0 }
+        }
+      ]
+    },
+
+    sber: {
+      name: "СберБизнес Прайм (модули)",
+      payments_modules: [
+        { code: "A", included: 5, cost: 0 },
+        { code: "C", included: 50, cost: 1590 },
+        { code: "D", included: 150, cost: 2990 }
+      ],
+      payments_over_fee_per_payment: 100,
+
+      // Вывод себе (ИП): лимит по модулю + сверх 2.5%
+      self_withdraw_modules_ip: [
+        { code: "A", limit: 500000, cost: 0 },
+        { code: "B", limit: 750000, cost: 990 },
+        { code: "C", limit: 1000000, cost: 3190 },
+        { code: "D", limit: 1500000, cost: 6990 }
+      ],
+      self_withdraw_over_percent: 2.5
+    }
+  };
+
+  // =======================
+  // UI utils
+  // =======================
+  const elOut = document.getElementById("out");
+  const elTs = document.getElementById("ts");
+  const elData = document.getElementById("data");
+
+  function fmtRub(x){
+    const n = Math.round(x);
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽";
+  }
+  function parseNum(str){
+    return Number(String(str).replace(/[^\d]/g, "")) || 0;
+  }
+  function toInfinity(v){
+    if (v === "Infinity") return Infinity;
+    if (typeof v === "number") return v;
+    return Number(v);
+  }
+
+  // =======================
+  // CALC: VTB
+  // =======================
+  function vtbMonthlyFee(plan, incoming){
+    if (typeof plan.monthly_fee_flat === "number") return { fee: plan.monthly_fee_flat, note: "фикс" };
+
+    const r = plan.monthly_fee_rule;
+    if (!r) return { fee: 0, note: "0" };
+
+    if (r.type === "vtb_na_starte"){
+      // В калькуляторе мы не ведём "месяц обслуживания", поэтому считаем по правилу "после 3-го месяца"
+      const fee = (incoming >= r.incoming_free_threshold) ? 0 : r.fee_if_below;
+      return { fee, note: `после 3-го мес: 0 ₽ при обороте ≥ ${fmtRub(r.incoming_free_threshold)}, иначе ${fmtRub(r.fee_if_below)}` };
+    }
+
+    if (r.type === "percent_of_incoming"){
+      const fee = incoming * (r.percent / 100);
+      return { fee, note: `${r.percent}% от входящего оборота` };
+    }
+
+    return { fee: 0, note: "0" };
+  }
+
+  function vtbPaymentsCost(plan, paymentsCount){
+    const free = toInfinity(plan.payments_other_banks?.free_count ?? 0);
+    const ppp = Number(plan.payments_other_banks?.price_per_payment ?? 0);
+    const billable = (free === Infinity) ? 0 : Math.max(0, paymentsCount - free);
+    const cost = billable * ppp;
+    return { cost, text: `${paymentsCount} шт (бесплатно ${free===Infinity?"∞":free}) → платных ${billable} × ${fmtRub(ppp)} = ${fmtRub(cost)}` };
+  }
+
+  function calcVTB(data, input){
+    const rows = [];
+    for (const plan of data.vtb.plans){
+      const parts = [];
+      const feeRes = vtbMonthlyFee(plan, input.incoming);
+      parts.push(`Пакет: ${fmtRub(feeRes.fee)} (${feeRes.note})`);
+
+      const pmtRes = vtbPaymentsCost(plan, input.payments_other);
+      parts.push(`Платежи юрлицам в другие банки: ${pmtRes.text}`);
+
+      // Вывод себе — 0
+      parts.push(`Вывод себе: 0 ₽ (бесплатно и безлимитно)`);
+
+      const total = feeRes.fee + pmtRes.cost;
+      rows.push({
+        bank: "ВТБ",
+        tariff: plan.name,
+        total,
+        details: parts
+      });
+    }
+    return rows;
+  }
+
+  // =======================
+  // CALC: SBER (auto pick modules)
+  // =======================
+  function pickCheapestCover(modules, required){
+    // выбираем самый дешёвый модуль, который покрывает required (included/limit)
+    const ok = modules.filter(m => typeof m.included === "number" && m.included >= required);
+    if (ok.length) return ok.sort((a,b)=>a.cost-b.cost)[0];
+    return null;
+  }
+  function pickCheapestCoverLimit(modules, required){
+    const ok = modules.filter(m => typeof m.limit === "number" && m.limit >= required);
+    if (ok.length) return ok.sort((a,b)=>a.cost-b.cost)[0];
+    return null;
+  }
+  function pickMaxIncluded(modules){
+    return modules.slice().sort((a,b)=>(b.included??0)-(a.included??0))[0] || null;
+  }
+  function pickMaxLimit(modules){
+    return modules.slice().sort((a,b)=>(b.limit??0)-(a.limit??0))[0] || null;
+  }
+
+  function calcSberAuto(data, input){
+    const parts = [];
+
+    // Платежи (шт)
+    let payMod = pickCheapestCover(data.sber.payments_modules, input.payments_other);
+    let payOver = 0;
+    if (!payMod){
+      payMod = pickMaxIncluded(data.sber.payments_modules);
+      const included = payMod?.included ?? 0;
+      const overCnt = Math.max(0, input.payments_other - included);
+      payOver = overCnt * data.sber.payments_over_fee_per_payment;
+    }
+    const payCost = (payMod?.cost ?? 0) + payOver;
+    parts.push(`Модуль платежей: ${payMod?.code ?? "—"} (${payMod?.included ?? 0} шт) = ${fmtRub(payMod?.cost ?? 0)}; сверх = ${fmtRub(payOver)}`);
+
+    // Вывод себе (₽)
+    const withdraw = input.withdraw_self;
+    let wMod = pickCheapestCoverLimit(data.sber.self_withdraw_modules_ip, withdraw);
+    let wOver = 0;
+    if (!wMod){
+      wMod = pickMaxLimit(data.sber.self_withdraw_modules_ip);
+      const limit = wMod?.limit ?? 0;
+      const overAmt = Math.max(0, withdraw - limit);
+      wOver = overAmt * (data.sber.self_withdraw_over_percent / 100);
+    }
+    const wCost = (wMod?.cost ?? 0) + wOver;
+    parts.push(`Модуль вывода себе: ${wMod?.code ?? "—"} (лимит ${fmtRub(wMod?.limit ?? 0)}) = ${fmtRub(wMod?.cost ?? 0)}; сверх 2.5% = ${fmtRub(wOver)}`);
+
+    const total = payCost + wCost;
+
+    return [{
+      bank: "Сбер",
+      tariff: `Прайм (авто): платежи ${payMod?.code ?? "?"} + вывод ${wMod?.code ?? "?"}`,
+      total,
+      details: parts
+    }];
+  }
+
+  // =======================
+  // RENDER
+  // =======================
+  function render(){
+    elTs.textContent = new Date().toLocaleString("ru-RU");
+
+    let data;
+    try{
+      data = JSON.parse(elData.value);
+    }catch(e){
+      elOut.innerHTML = `<tr><td colspan="3"><b>Ошибка JSON:</b> ${e.message}</td></tr>`;
+      return;
+    }
+
+    const input = {
+      withdraw_self: parseNum(document.getElementById("withdraw_self").value),
+      payments_other: parseNum(document.getElementById("payments_other").value),
+      incoming: parseNum(document.getElementById("incoming").value)
+    };
+
+    const rows = [
+      ...calcVTB(data, input),
+      ...calcSberAuto(data, input)
+    ].sort((a,b)=>a.total-b.total);
+
+    elOut.innerHTML = rows.map(r => `
+      <tr>
+        <td><strong>${r.bank}</strong><div class="muted">${r.tariff}</div></td>
+        <td><strong>${fmtRub(r.total)}</strong></td>
+        <td>
+          <details>
+            <summary>Показать</summary>
+            <div class="muted" style="margin-top:6px;">
+              ${r.details.map(x => `• ${x}`).join("<br/>")}
+            </div>
+          </details>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  // =======================
+  // Tabs
+  // =======================
+  function setTab(which){
+    const calc = document.getElementById("view-calc");
+    const data = document.getElementById("view-data");
+    const t1 = document.getElementById("tab-calc");
+    const t2 = document.getElementById("tab-data");
+
+    calc.style.display = (which==="calc") ? "" : "none";
+    data.style.display = (which==="data") ? "" : "none";
+
+    t1.classList.toggle("active", which==="calc");
+    t2.classList.toggle("active", which==="data");
+  }
+  document.getElementById("tab-calc").addEventListener("click", ()=>setTab("calc"));
+  document.getElementById("tab-data").addEventListener("click", ()=>setTab("data"));
+
+  // init
+  elData.value = JSON.stringify(DEFAULT_DATA, null, 2);
+  document.getElementById("calcBtn").addEventListener("click", render);
+  ["withdraw_self","payments_other","incoming"].forEach(id=>{
+    const DATA_TAB_PASSWORD = "0101";
+
+document.getElementById("tab-data").addEventListener("click", () => {
+
+  // если пароль уже вводили — пускаем сразу
+  if (localStorage.getItem("data_tab_unlocked") === "1") {
+    setTab("data");
+    return;
+  }
+
+  const entered = prompt("Введите пароль для доступа к вкладке «Данные»:");
+  if (entered === null) return; // отмена
+
+  if (entered === DATA_TAB_PASSWORD) {
+    localStorage.setItem("data_tab_unlocked", "1");
+    setTab("data");
+  } else {
+    alert("Неверный пароль");
+    setTab("calc");
+  }
+});
+  });
+  render();
+</script>
+<script>
+(function () {
+  // 1) inject CSS for dark mode
+  const st = document.createElement("style");
+  st.textContent = `
+    body.dark { background:#0f1115 !important; color:#e6e6e6 !important; }
+    body.dark .card { background:#161a22 !important; box-shadow:none !important; }
+    body.dark input, body.dark textarea {
+      background:#0f1115 !important; color:#e6e6e6 !important; border:1px solid #2a2f3a !important;
+    }
+    body.dark table th, body.dark table td { border-color:#2a2f3a !important; }
+    body.dark .muted { color:#9aa0aa !important; }
+    body.dark .tab { background:#161a22 !important; border-color:#2a2f3a !important; color:#e6e6e6 !important; }
+    body.dark .tab.active { background:#fff !important; color:#111 !important; }
+  `;
+  document.head.appendChild(st);
+
+  // 2) create toggle button
+  const btn = document.createElement("button");
+  btn.id = "themeToggle";
+  btn.title = "Сменить тему";
+  btn.style.cssText = `
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 2147483647;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    background: #111;
+    color: #fff;
+  `;
+  btn.textContent = "🌙";
+  document.body.appendChild(btn);
+
+  // 3) load saved theme
+  const saved = localStorage.getItem("theme");
+  if (saved === "dark") {
+    document.body.classList.add("dark");
+    btn.textContent = "🌞";
+  }
+
+  // 4) toggle
+  btn.addEventListener("click", () => {
+    const isDark = document.body.classList.toggle("dark");
+    btn.textContent = isDark ? "🌞" : "🌙";
+    localStorage.setItem("theme", isDark ? "dark" : "light");
+  });
+})();
+</script>
+<footer style="
+  margin-top: 24px;
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #777;
+">
+  Разработано Байрамов Солтан · 2026
+</footer>
+</body>
+</html>
